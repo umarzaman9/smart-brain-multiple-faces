@@ -7,6 +7,8 @@ import FaceRecognition from './components/FaceRecognition/FaceRecognition';
 import SignIn from './components/SignIn/SignIn';
 import Register from './components/Register/Register';
 import Particles from 'react-particles-js';
+import Modal from './components/Modal/Modal';
+import Profile from './components/profile/Profile';
 import './App.css';
 
 const particleOptions = {
@@ -26,15 +28,18 @@ const initialState = {
 
       input: '',
       imageUrl: '',
-      box: {},
+      boxes: [],
       route: 'signin',
       isSignedIn: false,
+      isProfileOpen: false,
       user: {
         id: '',
         name: '',
         email: '',
         entries: 0,
-        joined: ''
+        joined: '',
+        pet: '',
+        age: ''
       }
 }
 
@@ -53,28 +58,60 @@ class  App extends Component {
     }})
   }
   
- /* componentDidMount() {
-    fetch('http://localhost:3000/')
-    .then(response=>response.json())
-    .then(console.log);
-  }*/
-
-  calculateFaceLocation = (data) => {
-    const clarifaiFace = data.outputs[0].data.regions[0].region_info.bounding_box;
-    const image = document.getElementById('inputimage');
-    const width = Number(image.width);
-    const height = Number(image.height);
-    return {
-      leftCol: clarifaiFace.left_col * width,
-      topRow: clarifaiFace.top_row * height,
-      rightCol: width - (clarifaiFace.right_col * width),
-      bottomRow: height - (clarifaiFace.bottom_row * height)
+ componentDidMount() {
+    const token = window.sessionStorage.getItem('token');
+    if (token) {
+      fetch('http://localhost:3000/signin' , {
+        method: 'post',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token
+        }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.id) {
+          fetch(`http://localhost:3000/profile/${data.id}`, {
+            method: 'get',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': token
+        }
+          })
+          .then(resp => resp.json())
+          .then(user => {
+            if (user && user.email) {
+              this.loadUser(user)
+              this.onRouteChange('home');
+            }
+          })
+        }
+      }).catch(console.log)
     }
-
   }
 
-  displayFaceBox = (box) => {
-    this.setState({box: box});
+  calculateFaceLocations = (data) => {
+    if (data && data.outputs) {
+      return data.outputs[0].data.regions.map(face => {
+      const clarifaiFace =  face.region_info.bounding_box;
+      const image = document.getElementById('inputimage');
+      const width = Number(image.width);
+      const height = Number(image.height);
+      return {
+        leftCol: clarifaiFace.left_col * width,
+        topRow: clarifaiFace.top_row * height,
+        rightCol: width - (clarifaiFace.right_col * width),
+        bottomRow: height - (clarifaiFace.bottom_row * height)
+      }
+      });
+    }
+    return;
+  }
+
+  displayFaceBoxes = (boxes) => {
+    if (boxes) {
+    this.setState({boxes: boxes});
+    }
   }
   onInputChange = (event) => {
     this.setState({input: event.target.value});
@@ -83,9 +120,13 @@ class  App extends Component {
   onButtonSubmit = () => {
     this.setState({imageUrl: this.state.input});
 
-    fetch('https://fast-ocean-94719.herokuapp.com/imageurl', {
+    fetch('http://localhost:3000/imageurl', {
       method: 'post',
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': window.sessionStorage.getItem('token')
+
+      },
       body: JSON.stringify({
         input: this.state.input
       })
@@ -93,9 +134,13 @@ class  App extends Component {
     .then(response=>response.json())
     .then(response => {
    if (response) {
-          fetch('https://fast-ocean-94719.herokuapp.com/image', {
+          fetch('http://localhost:3000/image', {
             method: 'put',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': window.sessionStorage.getItem('token')
+
+            },
             body: JSON.stringify({
               id: this.state.user.id
             })
@@ -106,23 +151,30 @@ class  App extends Component {
         }) 
         .catch(console.log) 
       }
-      this.displayFaceBox(this.calculateFaceLocation(response))
+      this.displayFaceBoxes(this.calculateFaceLocations(response))
       })
     .catch (err=> console.log(err));
   }
 
   onRouteChange = (route) => {
     if(route ==='signout') {
-      this.setState(initialState)
+      return this.setState(initialState)
     } else if (route==='home') {
       this.setState({isSignedIn: true})
     }
     this.setState({route: route});
   }
 
+  toggleModal = () => {
+    this.setState(prevState => ({
+      ...prevState,
+      isProfileOpen: !prevState.isProfileOpen
+    }))
+  }
+
   render() {
 
-    const {isSignedIn, imageUrl, route, box} = this.state;
+    const {isSignedIn, user, imageUrl, route, boxes, isProfileOpen} = this.state;
 
     return (
       <div className="App"> 
@@ -130,9 +182,24 @@ class  App extends Component {
                 params={particleOptions} />
 
         
-        <Nav isSignedIn= {isSignedIn} onRouteChange = {this.onRouteChange} />
+        <Nav isSignedIn= {isSignedIn} onRouteChange = {this.onRouteChange}
+              toggleModal={this.toggleModal}
+              />
+
+        { isProfileOpen && 
+          <Modal> 
+            <Profile 
+              isProfileOpen={isProfileOpen} 
+              toggleModal= {this.toggleModal} 
+              loadUser = {this.loadUser}
+              user = {user} 
+              /> 
+          </Modal> 
+        }
+
         {route ==='home'
         ?  <div> <Logo/>
+        
         <Rank
         name={this.state.user.name}
         entries={this.state.user.entries} 
@@ -141,7 +208,7 @@ class  App extends Component {
         onInputChange= {this.onInputChange}
         onButtonSubmit = {this.onButtonSubmit}  
         />
-        <FaceRecognition box={box} imageUrl = {imageUrl}/>
+        <FaceRecognition boxes={boxes} imageUrl = {imageUrl}/>
         </div>
         : (
           this.state.route === 'signin'
